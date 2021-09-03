@@ -1,0 +1,1304 @@
+---
+title: "NHANES Project STAT 235"
+author: "Lee Kapp"
+date: "11/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(readxl); library(tidyverse); library(DescTools); library(gtools);library(gridExtra); library(kableExtra)
+library(VGAM); library(nnet); library(MASS); library(ResourceSelection); library(leaps); library(GGally)
+```
+
+```{r}
+## expit function
+expit <- function(x){exp(x)/(1+exp(x))}
+
+## round to nearest 5
+mround <- function(x,base){ 
+        base*round(x/base)   #divides number x by base, rounds the answer and multiplies by base
+} 
+```
+
+
+```{r import}
+##National Health and Nutrition Examination Survey 2017-2018
+data<-read.csv("/Users/leekapp/Documents/Portfolio/STAT235Final/NHANESdata.csv")
+data<-data[-1]
+colnames(data) <- c("Subject", "Gender", "Age (years)", "Race", "BMI", "Fasting Glucose (mg/dL)",
+                    "Glycohemoglobin", "Insulin (µU/ml)", "Serum Iron (µg/dL)", "UIBC (µg/dL)", "TIBC (µg/dL)", "Transferrin Sat (%)", "Ferritin (ng/ml)", "White Cells (1000 cells/µl)", "Lymphocytes (1000 cells/µl)", "Monocytes (1000 cells/µl)", "Segmented Neutrophils (1000 cells/µl)", "Eosinophils (1000 cells/µl)", "Basophils (1000 cells/µl)", "RBCs (million/µl)", "Hemoglobin (g/dL)", "Hematocrit (%)", "Mean Cell Vol (fL)", "Mean Cell HGB (pg)", " Mean Cell HGB Conc. (g/dL)", "Alanine Aminotransferase (IU/L)", "Albumin (g/dL)", "Alk Phos (IU/L)", "Aspartate Aminotransferase (IU/L)", "Creatine Phosphokinase (IU/L)", "Gamma glutamyl Transferase (IU/L)", "Lactate Dehydrogenase (IU/L)", "Total Bilirubin (g/dL)", "Cholesterol (mg/dL)", "Total Protein (g/dL)", "Triglycerides (mg/dL)", "Uric Acid (mg/dL)", "Table_Salt_Freq", "Cook_w_Salt", "Salt_Yesterday", "Told_Have_Diab", "Told_Have_Prediab", "Told_Diab_Risk", "Tested_Past_3yr", "Take_Insulin", "A1C_checked_1yr", "Last_A1C", "Last_SBP", "Last_DBP", "Systolic_BP", "Diastolic_BP", "HgB_A1C", "Blood_Sugar", "Hypercholesterolemia", "BMI_Category", "Triglyceride_Level", "Liver_Function", "Ferritin_Level", "Iron_Level", "Iron_Saturation", "Iron_Binding")
+data <- data[-c(1, 9:33, 35, 37, 46:49, 70:72)]
+wFastGluc <- data %>% filter(!is.na(data$`Fasting Glucose (mg/dL)`))
+```
+
+### Isolating numeric columns
+```{r}
+numData <- data %>% select_if(is.numeric,)
+
+```
+
+#### Demographic Plots
+```{r demo plots, echo=FALSE, message=FALSE}
+#grouping by Age - per year
+ggplot(data = data, mapping = aes(x = `Age (years)`, y = BMI, group = `Age (years)`, color = Gender)) +
+        geom_boxplot() +
+        labs(title = "Box plots of Body Mass Index vs Age", x = "Age (years)", y = "BMI") +
+        theme_light()
+
+ggplot(data = data, mapping = aes(x = Race  , y = BMI, fill = Gender)) +
+        geom_boxplot() +
+        labs(title = "Box plots of Body Mass Index vs Race by Gender", x = "Race", y = "BMI") +
+        theme_light()
+```
+
+#### Does the variance of BMI change with age?
+```{r BMIvariance, message=FALSE, echo=FALSE}
+BMI_Variance <- round(data.frame(data %>% group_by(`Age (years)`) %>% summarise(var(BMI, na.rm = TRUE))), 2)
+colnames(BMI_Variance)<-c("Age", "Variance(BMI)")
+bmiMean<- round(data.frame(data %>% group_by(`Age (years)`) %>% summarise(mean(BMI, na.rm = TRUE))), 2)
+colnames(bmiMean)<-c("Age", "Mean(BMI)")
+BMI_Variance<-left_join(BMI_Variance, bmiMean, by = "Age")
+
+BMI_Variance <- BMI_Variance %>% mutate(BMI_Category <- case_when(
+  `Mean(BMI)` < 18.5 ~ "underweight",
+  `Mean(BMI)` >= 18.5 & `Mean(BMI)` < 25 ~ "normal",
+  `Mean(BMI)` >= 25 & `Mean(BMI)` < 30 ~ "overweight",
+  `Mean(BMI)` >= 30 ~ "obese"))
+colnames(BMI_Variance)<-c("Age", "Variance(BMI)", "Mean(BMI)", "BMI_Category")
+
+varReg<-lm(data = BMI_Variance, `Variance(BMI)` ~ Age)
+summary(varReg)
+
+ggplot(data = BMI_Variance, mapping = aes(x = Age, y = `Variance(BMI)`, color = BMI_Category)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Variance of BMI by Age") +
+         theme_light()
+
+
+```
+
+### Boxplots of metabolites
+```{r metabolite boxplots}
+
+names <- colnames(numData)
+for(i in 1:ncol(numData)) {                              # Printing ggplot within for-loop
+  plt = ggplot(numData, aes(y = numData[ , i])) +
+          geom_boxplot() +
+          labs(title = names[i], y = "") +
+          theme_minimal()
+  print(plt)
+}
+
+#Have to add race and gender columns to numData
+metabolites <- cbind(data[1], data[3], numData)
+namesMets <- colnames(metabolites)
+# Boxplots of metabolites by race and gender
+for(i in 4:ncol(metabolites)) {                              
+  plt = ggplot(metabolites, aes(x = Race, y = metabolites[ , i], fill = Gender)) +
+          geom_boxplot() +
+          labs(title = namesMets[i], y = "") +
+          theme_minimal()
+  print(plt)
+}
+
+```
+
+### Histograms of metabolites by race and gender
+```{r metabolite hists}
+for(i in 4:ncol(metabolites)) {                              
+  plt = ggplot(metabolites, aes(x = metabolites[ , i], fill = Gender)) +
+          geom_histogram() +
+          labs(title = namesMets[i], x = namesMets[i]) +
+          facet_wrap(vars(Race)) +
+          theme_minimal() 
+  print(plt)
+}
+
+```
+
+#### Selected EDA plots for Glucose
+```{r EDA plots, message=FALSE}
+df<-data %>% filter(Blood_Sugar != "unknown",
+                    BMI_Category != "unknown" & BMI_Category != "underweight",
+                    Told_Diab_Risk != "Don't Know")
+
+A1CplotGender<- ggplot(data = df, mapping = aes(x = `Fasting Glucose (mg/dL)`, y = Glycohemoglobin , color = Blood_Sugar)) +
+        geom_point() +
+        labs(title = "Glycohemoglobin by Fasting Glucose", x = "Glucose (mg/dL)", y = "Glycohemoglobin") +
+        theme_light()
+A1CplotGender + facet_wrap(vars(Gender))
+
+
+A1CplotDiab<- ggplot(data = df, mapping = aes(x = `Fasting Glucose (mg/dL)`, y = Glycohemoglobin , color = Blood_Sugar)) +
+        geom_point() +
+        labs(title = "Glycohemoglobin by Fasting Glucose", x = "Glucose (mg/dL)", y = "Glycohemoglobin") +
+        theme_light()
+A1CplotDiab + facet_wrap(vars(Race))
+
+A1CBMIplotDiab<- ggplot(data = df, mapping = aes(x = `Fasting Glucose (mg/dL)`, y = Glycohemoglobin , color = Blood_Sugar)) +
+        geom_point() +
+        labs(title = "Glycohemoglobin by Fasting Glucose", x = "Glucose (mg/dL)", y = "Glycohemoglobin") +
+        theme_light()
+A1CBMIplotDiab + facet_wrap(vars(BMI_Category))
+
+```
+
+### EDA plots for BMI
+```{r BM EDA, message=FALSE, echo=FALSE}
+BMIdistSugar<-ggplot(data = df, mapping = aes(x = BMI_Category, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "BMI by Race and Blood Sugar", x = "BMI") +
+  theme_light()
+BMIdistSugar + facet_wrap(vars(Race))
+
+BMIdistInfo<-ggplot(data = df, mapping = aes(x = Told_Diab_Risk, fill = BMI_Category)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Risk by BMI and Race", x = "Informed of diabetes risk") +
+  theme_light()
+BMIdistInfo + facet_wrap(vars(Race))
+BMIdistInfo<-ggplot(data = df, mapping = aes(x = Told_Diab_Risk, fill = BMI_Category)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Risk by BMI and Diabetes Criteria", x = "Informed of diabetes risk") +
+  theme_light()
+BMIdistInfo + facet_wrap(vars(Blood_Sugar))
+```
+
+### EDA plots for being informed of risk of diabetes
+```{r informed risk}
+df<-data %>% filter(!is.na(Told_Diab_Risk) & Told_Diab_Risk != "Don't Know" & Blood_Sugar != "unknown")
+toldRace<-ggplot(data = df, mapping = aes(x = Told_Diab_Risk, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Risk by Race", x = "Told at risk for diabetes") +
+  theme_light()
+toldRace + facet_wrap(vars(Race))
+## need a table to look at proportions by race
+
+df<-data %>% filter(!is.na(Told_Diab_Risk) & Told_Diab_Risk != "Don't Know" & Blood_Sugar != "unknown")
+toldGender<-ggplot(data = df, mapping = aes(x = Told_Diab_Risk, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Risk by Gender", x = "Told at risk for diabetes") +
+  theme_light()
+toldGender + facet_wrap(vars(Gender))
+
+df<-data %>% filter(!is.na(Told_Diab_Risk) & Told_Diab_Risk != "Don't Know" & Blood_Sugar != "unknown" & BMI_Category != "unknown" & BMI_Category != "underweight")
+toldBMI<-ggplot(data = df, mapping = aes(x = Told_Diab_Risk, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Risk by BMI", x = "Told at risk for diabetes") +
+  theme_light()
+toldBMI + facet_wrap(vars(BMI_Category))
+## need table to look at proportions by BMI category
+```
+
+### EDA plots for being told one was diagnosed with diabetes
+```{r informed diagnosis}
+df<-data %>% filter(Blood_Sugar != "unknown")
+df<-df %>% filter(BMI_Category != "unknown", BMI_Category != "underweight")
+df<-df %>% filter(Told_Have_Diab != "Don't Know", Told_Have_Diab != "Borderline")
+toldDiagRace<-ggplot(data = df, mapping = aes(x = Told_Have_Diab, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Diagnosis by Race", x = "Told have diabetes") +
+  theme_light()
+toldDiagRace + facet_wrap(vars(Race))
+## need a table to look at proportions by race
+
+toldDiagGender<-ggplot(data = df, mapping = aes(x = Told_Have_Diab, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Diagnosis by Gender", x = "Told have diabetes") +
+  theme_light()
+toldDiagGender + facet_wrap(vars(Gender))
+
+toldDiagBMI<-ggplot(data = df, mapping = aes(x = Told_Have_Diab, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Diabetes Diagnosis by BMI", x = "Told have diabetes") +
+  theme_light()
+toldDiagBMI + facet_wrap(vars(BMI_Category))
+```
+
+### EDA plots for one being informed of prediabetes status
+```{r informed Pre}
+df<-data %>% filter(Blood_Sugar != "unknown")
+df<-df %>% filter(BMI_Category != "unknown", BMI_Category != "underweight")
+df<-df %>% filter(Told_Have_Prediab != "Don't Know")
+toldPreRace<-ggplot(data = df, mapping = aes(x = Told_Have_Prediab, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Pre-diabetes Diagnosis by Race", x = "Told have pre-diabetes") +
+  theme_light()
+toldPreRace + facet_wrap(vars(Race))
+## need a table to look at proportions by race
+
+toldPreGender<-ggplot(data = df, mapping = aes(x = Told_Have_Prediab, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Pre-diabetes Diagnosis by Gender", x = "Told have pre-diabetes") +
+  theme_light()
+toldPreGender + facet_wrap(vars(Gender))
+
+toldPreBMI<-ggplot(data = df, mapping = aes(x = Told_Have_Prediab, fill = Blood_Sugar)) +
+  geom_bar() +
+  labs(title = "Informed of Pre-diabetes Diagnosis by BMI", x = "Told have pre-diabetes") +
+  theme_light()
+toldPreBMI + facet_wrap(vars(BMI_Category))
+```
+
+### Plots of blood pressure metrics by table salt use - self reported salt use is not at all correlated with hypertension
+```{r salt}
+df<-data %>% filter(Diastolic_BP !=0, Table_Salt_Freq != "Don't Know", !is.na(Table_Salt_Freq), BMI_Category != "unknown", BMI_Category != "underweight")
+p<-ggplot(data=df, mapping = aes(x = Systolic_BP, y = Diastolic_BP, color = Table_Salt_Freq))+
+  geom_point() +
+  labs(title = "Systolic vs Diastolic BP and Frequency of Salt Use by Race") +
+  theme_light()
+p + facet_wrap(vars(Race))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/salt1.pdf")
+
+data <- data %>% mutate_at(vars(Gender), list( ~ case_when(. == 1 ~ "Male", . == 2 ~ "Female")))
+
+df$Hypertension<-ifelse(df$Systolic_BP > 120 | df$Diastolic_BP > 80, "Yes", "No")
+p<-ggplot(data=df, mapping = aes(x = Systolic_BP, y = Diastolic_BP, color = Hypertension))+
+  geom_point() +
+  labs(title = "Systolic vs Diastolic BP and Frequency of Salt Use by Hypertension Criteria") +
+  theme_light()
+p + facet_wrap(vars(Table_Salt_Freq))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/salt2.pdf")
+
+p<-ggplot(data=df, mapping = aes(x = Systolic_BP, fill = Hypertension))+
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept=120) +
+  labs(title = "Systolic BP and Frequency of Salt Use by Hypertension Criteria") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_light()
+p + facet_wrap(vars(Table_Salt_Freq))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/salt3.pdf")
+
+p<-ggplot(data=df, mapping = aes(x = Systolic_BP, fill = BMI_Category))+
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept=120) +
+  labs(title = "Systolic BP and Frequency of Salt Use by BMI Category") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_light()
+p + facet_wrap(vars(Table_Salt_Freq))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/salt4.pdf")
+
+```
+
+### EDA plots for triglyceride and cholesterol levels show no obvious association between these metrics and BMI
+```{r fats}
+df<-data %>% filter(BMI_Category != "unknown", BMI_Category != "underweight", `Triglycerides (mg/dL)` < 500, `Cholesterol (mg/dL)` < 300, Glycohemoglobin <12, Blood_Sugar != "unknown")
+df$Hypertension<-ifelse(df$Systolic_BP > 120 | df$Diastolic_BP > 80, "Yes", "No")
+p<-ggplot(data=df, mapping = aes(x = `Cholesterol (mg/dL)`, fill = BMI_Category)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "BMI by Cholesterol") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Race))
+
+p<-ggplot(data=df, mapping = aes(x = `Triglycerides (mg/dL)`, fill = BMI_Category)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "BMI by Triglycerides") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Race))
+
+
+p<-ggplot(data=df, mapping = aes(x = `Cholesterol (mg/dL)`, fill = BMI_Category)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "BMI by Cholesterol") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Race))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/BMI_Chol1.pdf")
+
+p<-ggplot(data=df, mapping = aes(x = `Triglycerides (mg/dL)`, fill = BMI_Category)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "BMI by Triglycerides") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Race))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/BMI_Trig1.pdf")
+
+p<-ggplot(data=df, mapping = aes(x = `Triglycerides (mg/dL)`, fill = Blood_Sugar)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "BMI by Diabetes Criteria") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Race))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/BMI_Diab1.pdf")
+
+p<-ggplot(data=df, mapping = aes(x = `Triglycerides (mg/dL)`, fill = Blood_Sugar)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "BMI by Diabetes Criteria") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Gender))
+```
+
+### EDA plots for BMI and other measures
+```{r BMIglycGender}
+# df<-data %>% filter(BMI_Category != "unknown", BMI_Category != "underweight", `Triglycerides (mg/dL)` < 500, `Cholesterol (mg/dL)` < 300, Glycohemoglobin <12, Blood_Sugar != "unknown", `Insulin (µU/ml)` < 100, HgB_A1C != "unknown", Told_Diab_Risk != "Don't Know", Told_Have_Diab != "Don't Know", Told_Have_Prediab != "Don't Know")
+df<-data %>% filter(BMI_Category != "unknown", BMI_Category != "underweight", Blood_Sugar != "unknown", HgB_A1C != "unknown", Told_Diab_Risk != "Don't Know", Told_Have_Diab != "Don't Know", Told_Have_Prediab != "Don't Know")
+df$Hypertension<-ifelse(df$Systolic_BP > 120 | df$Diastolic_BP > 80, "Yes", "No")
+df$Hypertension <- factor(df$Hypertension, levels = c("No", "Yes"))
+df<-df %>% filter(!is.na(Hypertension))
+
+p<-ggplot(data=df, mapping = aes(x = `Cholesterol (mg/dL)`, fill = BMI_Category)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "BMI by Cholesterol") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Gender))
+
+p<-ggplot(data=df, mapping = aes(x = `Triglycerides (mg/dL)`, fill = BMI_Category)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "BMI by Triglycerides") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Gender))
+
+p<-ggplot(data=df, mapping = aes(x = `Cholesterol (mg/dL)`, fill = BMI_Category)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "BMI by Cholesterol") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Gender))
+
+p<-ggplot(data=df, mapping = aes(x = `Triglycerides (mg/dL)`, fill = BMI_Category)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "BMI by Triglycerides") +
+  scale_fill_manual(values = c("green","red", "yellow"))+
+  theme_minimal()
+p + facet_wrap(vars(Gender))
+
+p<-ggplot(data=df, mapping = aes(x = `Triglycerides (mg/dL)`, fill = Hypertension)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "Triglycerides by Blood Pressure") +
+  scale_fill_manual(values = c("green","red"))+
+  theme_minimal()
+p + facet_wrap(vars(Race))
+
+p<-ggplot(data=df, mapping = aes(x = `Cholesterol (mg/dL)`, fill = Hypertension)) +
+  geom_density(aes(y=..count..), alpha = 0.5) +
+  labs(title = "Cholesterol by Blood Pressure") +
+  scale_fill_manual(values = c("green","red"))+
+  theme_minimal()
+p + facet_wrap(vars(Race))
+```
+
+### EDA for associations with glycohemoglobin
+```{r glyc density}
+p<- ggplot(data = df, mapping = aes(x = Glycohemoglobin, fill = BMI_Category)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Glycohemoglobin by BMI Category", x = "Glycohemoglobin") +
+        scale_fill_manual(values = c("green","red", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+
+p<- ggplot(data = df, mapping = aes(x = Glycohemoglobin, fill = Blood_Sugar)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Glycohemoglobin by Diabetes Criteria", x = "Glycohemoglobin") +
+        scale_fill_manual(values = c("red","green", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/glyc_diab1.pdf")
+
+p<- ggplot(data = df, mapping = aes(x = Glycohemoglobin, fill = BMI_Category)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Glycohemoglobin by BMI Category", x = "Glycohemoglobin") +
+        scale_fill_manual(values = c("green","red", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = Glycohemoglobin, fill = Blood_Sugar)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Glycohemoglobin by Diabetes Criteria", x = "Glycohemoglobin") +
+        scale_fill_manual(values = c("red","green", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/glyc_diab2.pdf")
+
+p<- ggplot(data = df, mapping = aes(x = Glycohemoglobin, fill = Hypertension)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Glycohemoglobin by Blood Pressure", x = "Insulin (µU/ml)") +
+        scale_fill_manual(values = c("green","red", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+
+```
+
+### EDA for associations with BMI for disease states
+```{r BMI density}
+p<- ggplot(data = df, mapping = aes(x = BMI, fill = Blood_Sugar)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "BMI by Diabetes Criteria", x = "BMI") +
+        scale_fill_manual(values = c("red","green", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = BMI, fill = Hypercholesterolemia)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "BMI by Hypercholesterolemia", x = "BMI") +
+        scale_fill_manual(values = c("red","green", "yellow", "black"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = BMI, fill = Triglyceride_Level)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "BMI by Triglyceride Level", x = "BMI") +
+        scale_fill_manual(values = c("red","green", "yellow", "orange", "black"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = BMI, fill = Hypertension)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "BMI by Blood Pressure", x = "BMI") +
+        scale_fill_manual(values = c("green","red"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+p + facet_wrap(vars(Gender))
+```
+
+### EDA for associations with age
+```{r age}
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, y = BMI, color = Blood_Sugar)) +
+        geom_point() +
+        labs(title = "BMI by Age", x = "Age", y = "BMI") +
+        scale_color_manual(values = c("red","green", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, y = BMI, color = Blood_Sugar)) +
+        geom_point() +
+        labs(title = "BMI by Age", x = "Age", y = "BMI") +
+        scale_color_manual(values = c("red","green", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = BMI_Category)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by BMI Category", x = "Age") +
+        scale_fill_manual(values = c("green","red", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = Blood_Sugar)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Diabetes Criteria", x = "Age") +
+        scale_fill_manual(values = c("red","green", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/age_diab1.pdf")
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = HgB_A1C)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Glycohemoglobin", x = "Age") +
+        scale_fill_manual(values = c("red","green", "purple", "yellow"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = Triglyceride_Level)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Triglyceride Level", x = "Age") +
+        scale_fill_manual(values = c("yellow","green", "red", "orange", "black"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = Hypercholesterolemia)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Cholesterol Level", x = "Age") +
+        scale_fill_manual(values = c("yellow","green", "red", "orange", "black"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = Hypertension)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Blood Pressure", x = "Age") +
+        scale_fill_manual(values = c("green", "red"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/age_sbp1.pdf")
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = Told_Diab_Risk)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Informed of Diabetes Risk", x = "Age") +
+        scale_fill_manual(values = c("green", "red"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = Told_Have_Diab)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Diabetes Diagnosis", x = "Age") +
+        scale_fill_manual(values = c("green", "red"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+
+p<- ggplot(data = df, mapping = aes(x = `Age (years)`, fill = Told_Have_Prediab)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Age by Pre-diabetes Diagnosis", x = "Age") +
+        scale_fill_manual(values = c("green", "red"))+
+        theme_light()
+p + facet_wrap(vars(Race))
+
+
+```
+# Logistic regression fits begin here
+### Assembling an uncensored data frame for fits
+```{r full complete DF}
+newFDF<-data %>% dplyr::select(Gender, Glycohemoglobin, HgB_A1C, Blood_Sugar, `Insulin (µU/ml)`, BMI, BMI_Category, `Age (years)`, Systolic_BP, Diastolic_BP, `Triglycerides (mg/dL)`, `Cholesterol (mg/dL)`) %>% 
+    filter(BMI_Category != "unknown", BMI_Category != "underweight", Blood_Sugar != "unknown", HgB_A1C != "unknown")
+newFDF$Hypertension<-ifelse(newFDF$Systolic_BP > 120 | newFDF$Diastolic_BP > 80, "Yes", "No")
+newFDF$Hypertension <- factor(newFDF$Hypertension, levels = c("No", "Yes"))
+newFDF<-newFDF %>% filter(!is.na(Hypertension))
+
+## relevel each factor to have "normal" category as baseline
+newFDF$HgB_A1C <- factor(newFDF$HgB_A1C, levels = c("prediabetes", "diabetes", "normal"))
+newFDF$Blood_Sugar <- factor(newFDF$Blood_Sugar, levels = c("prediabetes", "diabetes", "normal"))
+newFDF$BMI_Category <- factor(newFDF$BMI_Category, levels = c("overweight", "obese", "normal"))
+newFDF<-newFDF %>% mutate(nA1C = relevel(HgB_A1C, ref = "normal"),
+                        nSugar = relevel(Blood_Sugar, ref = "normal"),
+                        nBMICat = relevel(BMI_Category, ref = "normal"))
+newFDF<-newFDF %>% mutate(roundBMI = round(BMI)) ## round BMI top nearest integer
+newFDF<-newFDF %>% mutate(roundAge = mround(`Age (years)`, 5)) ## round Age to nearest 5 years
+newFDF<-newFDF %>% mutate(roundInsulin = round(`Insulin (µU/ml)`)) ## round insulin to the nearest integer
+newFDF<-newFDF %>% mutate(roundSBP = mround(Systolic_BP, 5)) ## round insulin to the nearest 5
+```
+
+### Filtering out extreme values for cholesterol, triglycerides, and insulin for fits
+```{r new DF}
+newDF<-data %>% dplyr::select(Gender, Glycohemoglobin, HgB_A1C, Blood_Sugar, `Insulin (µU/ml)`, BMI, BMI_Category, `Age (years)`, Systolic_BP, Diastolic_BP, `Triglycerides (mg/dL)`, `Cholesterol (mg/dL)`) %>% 
+    filter(BMI_Category != "unknown", BMI_Category != "underweight", `Triglycerides (mg/dL)` < 500, `Cholesterol (mg/dL)` < 300, Glycohemoglobin <12, Blood_Sugar != "unknown", `Insulin (µU/ml)` < 100, HgB_A1C != "unknown")
+newDF$Hypertension<-ifelse(newDF$Systolic_BP > 120 | newDF$Diastolic_BP > 80, "Yes", "No")
+newDF$Hypertension <- factor(newDF$Hypertension, levels = c("No", "Yes"))
+newDF<-newDF %>% filter(!is.na(Hypertension))
+
+
+## relevel each factor to have "normal" category as baseline
+newDF$HgB_A1C <- factor(newDF$HgB_A1C, levels = c("prediabetes", "diabetes", "normal"))
+newDF$Blood_Sugar <- factor(newDF$Blood_Sugar, levels = c("prediabetes", "diabetes", "normal"))
+newDF$BMI_Category <- factor(newDF$BMI_Category, levels = c("overweight", "obese", "normal"))
+newDF<-newDF %>% mutate(nA1C = relevel(HgB_A1C, ref = "normal"),
+                        nSugar = relevel(Blood_Sugar, ref = "normal"),
+                        nBMICat = relevel(BMI_Category, ref = "normal"))
+newDF<-newDF %>% mutate(roundBMI = round(BMI)) ## round BMI top nearest integer
+newDF<-newDF %>% mutate(roundAge = mround(`Age (years)`, 5)) ## round Age to nearest 5 years
+newDF<-newDF %>% mutate(roundInsulin = round(`Insulin (µU/ml)`)) ## round insulin to the nearest integer
+newDF<-newDF %>% mutate(roundSBP = mround(Systolic_BP, 5)) ## round insulin to the nearest 5
+```
+
+
+```{r glm full data fits}
+set.seed(3)
+index <- sample(1:nrow(newFDF), nrow(newFDF)/5)
+train <- newDF[index, ]
+test <- newDF[-index, ]
+
+htnNull<-glm(Hypertension ~ 1, data = train, family = "binomial")
+summary(htnNull)
+
+htnChol<-glm(Hypertension ~ `Cholesterol (mg/dL)`, data = train, family = "binomial")
+summary(htnChol)
+
+htnTrig<-glm(Hypertension ~ `Triglycerides (mg/dL)`, data = train, family = "binomial")
+summary(htnTrig)
+
+htnGlyc<-glm(Hypertension ~ Glycohemoglobin, data = train, family = "binomial")
+summary(htnGlyc)
+
+htnBMI<-glm(Hypertension ~ BMI, data = train, family = "binomial")
+summary(htnBMI)
+
+htnAge<-glm(Hypertension ~ `Age (years)`, data = train, family = "binomial")
+summary(htnAge)
+
+##is the least accurate single predictor model better than the null model?
+anova(htnNull, htnChol, test="Chisq")
+```
+
+### glm fits for single predictors
+```{r glm fits}
+set.seed(3)
+index <- sample(1:nrow(newDF), nrow(newDF)/5)
+train <- newDF[index, ]
+test <- newDF[-index, ]
+
+htnNull<-glm(Hypertension ~ 1, data = train, family = "binomial")
+summary(htnNull)
+
+htnChol<-glm(Hypertension ~ `Cholesterol (mg/dL)`, data = train, family = "binomial")
+summary(htnChol)
+
+htnTrig<-glm(Hypertension ~ `Triglycerides (mg/dL)`, data = train, family = "binomial")
+summary(htnTrig)
+
+htnGlyc<-glm(Hypertension ~ Glycohemoglobin, data = train, family = "binomial")
+summary(htnGlyc)
+
+htnBMI<-glm(Hypertension ~ BMI, data = train, family = "binomial")
+summary(htnBMI)
+
+htnAge<-glm(Hypertension ~ `Age (years)`, data = train, family = "binomial")
+summary(htnAge)
+
+##is the least accurate single predictor model better than the null model?
+anova(htnNull, htnChol, test="Chisq")
+```
+
+### Pair plots for predictors of hypertension, BMI, A1C, and blood sugar
+```{r full data pair plot, message=FALSE}
+complete <- (complete.cases(newFDF))
+newFDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"),
+                       aes(color = factor(Hypertension, levels = c("Yes", "No")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of Hypertension") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/htnPairs.pdf", width = 10, height = 8, units = "in")
+
+newFDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"), aes(color = factor(Blood_Sugar, levels = c("diabetes", "normal", "prediabetes")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of Blood Sugar") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/sugarPairs.pdf", width = 10, height = 8, units = "in")
+
+newFDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"), aes(color = factor(BMI_Category, levels = c("obese", "normal", "overweight")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of BMI Category") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/bmiPairs.pdf", width = 10, height = 8, units = "in")
+
+newFDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"), aes(color = factor(HgB_A1C, levels = c("diabetes", "normal", "prediabetes")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of Hemoglobin A1C") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/a1cPairs.pdf", width = 10, height = 8, units = "in")
+```
+
+### Same pair plots as above on reduced dats
+```{r pair plot, message=FALSE}
+newDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"),
+                       aes(color = factor(Hypertension, levels = c("Yes", "No")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of Hypertension") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/htnPairs.pdf", width = 10, height = 8, units = "in")
+
+newDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"), aes(color = factor(Blood_Sugar, levels = c("diabetes", "normal", "prediabetes")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of Blood Sugar") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/sugarPairs.pdf", width = 10, height = 8, units = "in")
+
+newDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"), aes(color = factor(BMI_Category, levels = c("obese", "normal", "overweight")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of BMI Category") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/bmiPairs.pdf", width = 10, height = 8, units = "in")
+
+newDF %>% ggpairs(columns = c(1,5,7,10,11), columnLabels = c("Glycohemoglobin", "BMI", "Age", "Triglycerides", "Cholesterol"), aes(color = factor(HgB_A1C, levels = c("diabetes", "normal", "prediabetes")), alpha = 0.5)) +
+               ggtitle("Correlation of Predictors of Hemoglobin A1C") + 
+               theme_light(base_size = 14) +
+               theme(panel.grid.minor = element_blank())
+ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/a1cPairs.pdf", width = 10, height = 8, units = "in")
+```
+
+### Subset selection on glm fits
+```{r glm subset selection}
+nullMod<-glm(Hypertension ~ 1, family = "binomial", data = newDF)
+fullMod<-glm(Hypertension ~ BMI + Glycohemoglobin + `Age (years)` + `Cholesterol (mg/dL)` + `Triglycerides (mg/dL)`, family = "binomial", data = newDF)
+
+stepHtnF <- step(nullMod, direction = "both", trace = 0,
+                   scope = list(lower = formula(nullMod), upper = formula(fullMod)))
+
+stepHtnB <- step(fullMod, direction = "both", trace = 0,
+                   scope = list(lower = formula(nullMod), upper = formula(fullMod)))
+stepHtnF
+stepHtnB
+```
+
+### Training and testing logistic regression models
+```{r training and testing}
+#selecting training and test datasets
+set.seed(3)
+index <- sample(1:nrow(newDF), nrow(newDF)/5)
+train <- newDF[index, ]
+test <- newDF[-index, ]
+
+#First finding models with varying numbers of predictors based on training data
+#Best subset selection 
+regfitHtn<-regsubsets(Hypertension ~ BMI + Glycohemoglobin + `Age (years)` + `Cholesterol (mg/dL)` + `Triglycerides (mg/dL)`, data = train)
+reg.summ<-summary(regfitHtn)
+
+# Plot RSS, adjusted r-square, Cp, BIC for all the models at once
+# RSS Plot
+plot(reg.summ$rss, xlab = "Number of Variables", ylab = "RSS", type = "l")
+title("Residual sum of squares by number of predictors")
+# Adjusted RSq plot
+plot(reg.summ$adjr2, xlab = "Number of Variables", ylab = "Adjusted RSq", 
+    type = "l")
+title(expression("Adjusted R"^2* " by number of predictors"))
+
+# BIC plot
+plot(reg.summ$bic, xlab = "Number of Variables", ylab = "BIC", type = "l") ## min bic with 2 predictors
+title("BIC by number of predictors")
+
+# Plotting built into regsubsets()
+plot(regfitHtn, scale = "r2")
+plot(regfitHtn, scale = "adjr2") ## max occurs with the 4 predictor model
+plot(regfitHtn, scale = "Cp")
+plot(regfitHtn, scale = "bic") ## min occurs with the 2 predictor model
+
+coef(regfitHtn, 2) #glycohemoglobin and age
+coef(regfitHtn, 4) # BMI + cholesterol + glycohemoglobin + age
+
+mod2<-glm(Hypertension ~ Glycohemoglobin + `Age (years)`, family = "binomial", data = train)
+mod4<-glm(Hypertension ~ BMI + Glycohemoglobin + `Age (years)` + `Cholesterol (mg/dL)`, family = "binomial", data = train)
+summary(mod2)
+summary(mod4)
+
+anova(htnAge, mod2, test="Chisq")
+```
+
+### Determining test accuracies
+```{r testing accuracy}
+
+nullPreds<-predict(htnNull, test, type = "response")
+nullCall = ifelse(nullPreds > 0.5, "Yes", "No")
+null_cm <- table(actual_htn = test$Hypertension, predicted_htn = nullCall)
+null_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(null_cm)/sum(null_cm)), 4)))
+
+cholPreds<-predict(htnChol, test, type = "response")
+cholCall = ifelse(cholPreds > 0.5, "Yes", "No")
+chol_cm <- table(actual_htn = test$Hypertension, predicted_htn = cholCall)
+chol_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(chol_cm)/sum(chol_cm)), 4)))
+
+trigPreds<-predict(htnTrig, test, type = "response")
+trigCall = ifelse(trigPreds > 0.5, "Yes", "No")
+trig_cm <- table(actual_htn = test$Hypertension, predicted_htn = trigCall)
+trig_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(trig_cm)/sum(trig_cm)), 4)))
+
+glycPreds<-predict(htnGlyc, test, type = "response")
+glycCall = ifelse(glycPreds > 0.5, "Yes", "No")
+glyc_cm <- table(actual_htn = test$Hypertension, predicted_htn = glycCall)
+glyc_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(glyc_cm)/sum(glyc_cm)), 4)))
+
+bmiPreds<-predict(htnBMI, test, type = "response")
+bmiCall = ifelse(bmiPreds > 0.5, "Yes", "No")
+bmi_cm <- table(actual_htn = test$Hypertension, predicted_htn = bmiCall)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4)))
+
+agePreds<-predict(htnAge, test, type = "response")
+ageCall = ifelse(agePreds > 0.5, "Yes", "No")
+age_cm <- table(actual_htn = test$Hypertension, predicted_htn = ageCall)
+age_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(age_cm)/sum(age_cm)), 4)))
+
+#Obtaining test accuracy from selected models
+htnPreds2<-predict(mod2, test, type = "response")
+htnCall2 = ifelse(htnPreds2 > 0.5, "Yes", "No")
+htn2_cm <- table(actual_htn = test$Hypertension, predicted_htn = htnCall2)
+htn2_cm
+#correct call rate
+print(paste("The two predictor model has a test accuracy of ", round(sum(diag(htn2_cm)/sum(htn2_cm)), 4))) #69.65%
+
+htnPreds4<-predict(mod4, test, type = "response")
+htnCall4 = ifelse(htnPreds4 > 0.5, "Yes", "No")
+htn4_cm <- table(actual_htn = test$Hypertension, predicted_htn = htnCall4)
+htn4_cm
+#correct call rate
+print(paste("The four predictor model has a test accuracy of ", round(sum(diag(htn4_cm)/sum(htn4_cm)), 4)))
+
+```
+
+### Blood sugar regression
+```{r multinom sugar}
+## using vglm
+sugar_vglm<-vglm(Blood_Sugar~Glycohemoglobin, data = newDF, family = multinomial)
+summary(sugar_vglm)
+## using multinom()
+sugar_nnet<-multinom(nSugar~Glycohemoglobin, data = newDF)
+summary(sugar_nnet)
+
+groupedSugar<- newDF %>%filter(Glycohemoglobin > 4.7 & Glycohemoglobin < 7.7) %>%   group_by(Glycohemoglobin) %>% 
+                                    summarize(sugarCount = n(),
+                                              prediabetes = sum(Blood_Sugar == "prediabetes"),
+                                              diabetes = sum(Blood_Sugar == "diabetes"),
+                                              normal = sum(Blood_Sugar == "normal"))
+
+sugar_vglm_wide<-vglm(cbind(prediabetes, diabetes, normal) ~ Glycohemoglobin, family = "multinomial", data = groupedSugar)
+summary(sugar_vglm_wide)
+
+sugar_group_nnet <- multinom(cbind(normal, prediabetes, diabetes) ~ Glycohemoglobin, data = groupedSugar)
+summary(sugar_group_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(sugar_nnet))
+
+#Filtering for glycohemoglobin just above normal cutoff
+sugar_count <- groupedSugar %>% filter(Glycohemoglobin == 5.8) %>% 
+    dplyr::select(prediabetes:normal)
+sugar_count
+
+newDF %>% ggplot(aes(x = Glycohemoglobin, fill=Blood_Sugar)) + geom_vline(xintercept=5.8) +
+  
+          geom_density(aes(y=..count..), alpha=0.5) + theme_bw()+
+  
+          scale_fill_manual(values = c("yellow","red","green"))+
+  
+          labs(title="Blood Sugar Classification Density Plot When Glycohemoglobin is 5.8",
+               x= "Hemoglobin A1C") + scale_x_continuous(limits = c(4.8,7.6))
+df<-newDF %>% filter(Glycohemoglobin > 4.7 & Glycohemoglobin < 7.7) #have to match dimensions of data frame for the fit
+predSugar<-predict(sugar_nnet, df)
+sugar_cm<-table(actual_sugar = df$nSugar, predicted_sugar = predSugar)
+sugar_cm
+prop.table(sugar_cm,margin = 1)
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(sugar_cm)/sum(sugar_cm)), 4)))
+
+```
+
+### Glycohemoglobin vs. age
+```{r glyc and age}
+## adding age to the model
+sugar_age_vglm<-vglm(Blood_Sugar~Glycohemoglobin + `Age (years)`, data = newDF, family = multinomial)
+summary(sugar_age_vglm)
+## using multinom()
+sugar_age_nnet<-multinom(nSugar~Glycohemoglobin + `Age (years)`, data = newDF)
+summary(sugar_age_nnet)
+
+groupedSugar<- newDF %>%  group_by(Glycohemoglobin,`Age (years)`) %>% 
+                                    summarize(sugarCount = n(),
+                                              prediabetes = sum(Blood_Sugar == "prediabetes"),
+                                              diabetes = sum(Blood_Sugar == "diabetes"),
+                                              normal = sum(Blood_Sugar == "normal"))
+
+sugar_age_wide<-vglm(cbind(prediabetes, diabetes, normal) ~ Glycohemoglobin + `Age (years)`, family = "multinomial", data = groupedSugar)
+summary(sugar_age_wide)
+
+sugar_age_group <- multinom(cbind(normal, prediabetes, diabetes) ~ Glycohemoglobin + `Age (years)`, data = groupedSugar)
+summary(sugar_age_group)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(sugar_age_group))
+
+predSugar<-predict(sugar_age_nnet, newDF)
+sugar_cm<-table(actual_sugar = newDF$nSugar, predicted_sugar = predSugar)
+sugar_cm
+#correct call rate
+print(paste("The two predictor model has a test accuracy of ", round(sum(diag(sugar_cm)/sum(sugar_cm)), 4)))
+
+### Test using the likelihoods with and without Log_distance
+anova(sugar_nnet, sugar_age_nnet, test="Chisq") ## p-val is 6.25e-11
+```
+
+### Blood sugar by triglycerides
+```{r sugar trig}
+sugar_trig_vglm<- vglm(Blood_Sugar~`Triglycerides (mg/dL)`, data = newDF, family = multinomial)
+summary(sugar_trig_vglm)
+
+## using multinom()
+sugar_trig_nnet<-multinom(nSugar~`Triglycerides (mg/dL)`, data = newDF)
+summary(sugar_trig_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(sugar_trig_nnet))
+
+predsugar_trig<-predict(sugar_trig_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nSugar, predicted_bmi = predsugar_trig)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4))) ## normal never predicted
+```
+
+### Two predictors for blood sugar
+```{r sugar glyc trig}
+sugar_GT_vglm<- vglm(Blood_Sugar~Glycohemoglobin + `Triglycerides (mg/dL)`, data = newDF, family = multinomial)
+summary(sugar_GT_vglm)
+
+## using multinom()
+sugar_GT_nnet<-multinom(nSugar~Glycohemoglobin + `Triglycerides (mg/dL)`, data = newDF)
+summary(sugar_GT_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(sugar_GT_nnet))
+
+predGT<-predict(sugar_GT_nnet, newDF)
+bmi_cm<-table(actual_sugar = newDF$nSugar, predicted_sugar = predGT)
+bmi_cm
+#correct call rate
+print(paste("The two predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4))) ## normal never predicted
+
+### Test using the likelihoods with and without Log_distance
+anova(sugar_nnet, sugar_GT_nnet, test="Chisq") ## 5.97e-12
+```
+
+### Fits of BMI by age
+```{r bmi by age}
+bmi_age_vglm<- vglm(BMI_Category~`Age (years)`, data = newDF, family = multinomial)
+summary(bmi_age_vglm)
+
+## using multinom()
+bmi_age_nnet<-multinom(nBMICat~`Age (years)`, data = newDF)
+summary(bmi_age_nnet)
+
+groupedBMI<- newDF %>%   group_by(roundAge) %>% 
+                                    summarize(BMICount = n(),
+                                              overweight = sum(nBMICat == "overweight"),
+                                              obese = sum(nBMICat == "obese"),
+                                              normal = sum(nBMICat == "normal"))
+
+bmi_vglm_wide<-vglm(cbind(overweight, obese, normal) ~ roundAge, family = "multinomial", data = groupedBMI)
+summary(bmi_vglm_wide)
+
+bmi_group_nnet <- multinom(cbind(normal, overweight, obese) ~ roundAge, data = groupedBMI)
+summary(bmi_group_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_age_nnet))
+
+predBMI<-predict(bmi_group_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4))) ## normal never predicted but the grouped fit is much better than the ungrouped fit
+
+```
+
+### Fit of BMI by insulin level
+```{r bmi by insulin}
+bmi_ins_vglm<- vglm(BMI_Category~`Insulin (µU/ml)`, data = newDF, family = multinomial)
+summary(bmi_ins_vglm)
+
+## using multinom()
+bmi_ins_nnet<-multinom(nBMICat~`Insulin (µU/ml)`, data = newDF)
+summary(bmi_ins_nnet)
+
+groupedBMI_ins<- newDF %>%   group_by(roundInsulin) %>% 
+                                    summarize(BMICount = n(),
+                                              overweight = sum(nBMICat == "overweight"),
+                                              obese = sum(nBMICat == "obese"),
+                                              normal = sum(nBMICat == "normal"))
+
+bmi_ins_wide<-vglm(cbind(overweight, obese, normal) ~ roundInsulin, family = "multinomial", data = groupedBMI_ins)
+summary(bmi_ins_wide)
+
+bmi_ins_group_nnet <- multinom(cbind(normal, overweight, obese) ~ roundInsulin, data = groupedBMI_ins)
+summary(bmi_ins_group_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_ins_nnet))
+
+predBMI_ins<-predict(bmi_ins_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI)
+bmi_cm
+#correct call rate
+print(paste("The two predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4))) ## normal never predicted
+
+```
+
+### Fit of BMI by systolic BP
+```{r bmi sysBP}
+bmi_SBP_vglm<- vglm(BMI_Category~Systolic_BP, data = newDF, family = multinomial)
+summary(bmi_SBP_vglm)
+
+## using multinom()
+bmi_SBP_nnet<-multinom(nBMICat~Systolic_BP, data = newDF)
+summary(bmi_SBP_nnet)
+
+groupedBMI_SBP<- newDF %>%   group_by(roundSBP) %>% 
+                                    summarize(BMICount = n(),
+                                              overweight = sum(nBMICat == "overweight"),
+                                              obese = sum(nBMICat == "obese"),
+                                              normal = sum(nBMICat == "normal"))
+
+bmi_SBP_wide<-vglm(cbind(overweight, obese, normal) ~ roundSBP, family = "multinomial", data = groupedBMI_SBP)
+summary(bmi_SBP_wide)
+
+bmi_SBP_group_nnet <- multinom(cbind(normal, overweight, obese) ~ roundSBP, data = groupedBMI_SBP)
+summary(bmi_SBP_group_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_SBP_nnet))
+
+#Filtering for SBP just above normal cutoff
+BMI_count <- groupedBMI_SBP %>% filter(roundSBP == 125) %>% 
+    dplyr::select(overweight:normal)
+BMI_count
+
+newDF %>% ggplot(aes(x = Systolic_BP, fill=BMI_Category)) + geom_vline(xintercept=125) +
+  
+          geom_density(aes(y=..count..), alpha=0.5) + theme_bw()+
+  
+          scale_fill_manual(values = c("yellow","red","green"))+
+  
+          labs(title="BMI Classification Density Plot When Systolic BP is 125",
+               x= "Systolic BP")
+
+predBMI_SBP<-predict(bmi_SBP_group_nnet, groupedBMI_SBP)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI)
+bmi_cm
+#correct call rate
+print(paste("The two predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4))) ## normal never predicted
+## removing normal
+sum(diag(bmi_cm[-1,-1]))/sum(bmi_cm[-1,-1]) ## 56.17%
+```
+
+### Fit of BMI by glycohemoglobin
+```{r bmi glycohemoglobin}
+bmi_glyc_vglm<- vglm(BMI_Category~Glycohemoglobin, data = newDF, family = multinomial)
+summary(bmi_glyc_vglm)
+
+## using multinom()
+bmi_glyc_nnet<-multinom(nBMICat~Glycohemoglobin, data = newDF)
+summary(bmi_glyc_nnet)
+
+groupedBMI_glyc<- newDF %>%   group_by(Glycohemoglobin) %>% 
+                                    summarize(BMICount = n(),
+                                              overweight = sum(nBMICat == "overweight"),
+                                              obese = sum(nBMICat == "obese"),
+                                              normal = sum(nBMICat == "normal"))
+
+bmi_glyc_wide<-vglm(cbind(overweight, obese, normal) ~ Glycohemoglobin, family = "multinomial", data = groupedBMI_glyc)
+summary(bmi_glyc_wide)
+
+bmi_glyc_group_nnet <- multinom(cbind(normal, overweight, obese) ~ Glycohemoglobin, data = groupedBMI_glyc)
+summary(bmi_glyc_group_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_glyc_nnet))
+
+#Filtering for SBP just above normal cutoff
+BMI_count <- groupedBMI_glyc %>% filter(Glycohemoglobin == 5.8) %>% 
+    dplyr::select(overweight:normal)
+BMI_count
+
+newDF %>% ggplot(aes(x = Glycohemoglobin, fill=BMI_Category)) + geom_vline(xintercept=5.8) +
+  
+          geom_density(aes(y=..count..), alpha=0.5) + theme_bw()+
+  
+          scale_fill_manual(values = c("yellow","red","green"))+
+  
+          labs(title="BMI Classification Density Plot When Glycohemoglobin is 5.8",
+               x= "Hemoglobin A1C")
+
+predBMI_glyc<-predict(bmi_glyc_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI_glyc)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4))) ## normal never predicted
+
+## removing overweight category since it's never predicted
+round(sum(diag(bmi_cm[-2,-2]))/sum(bmi_cm[-2,-2]), 4) ##64.2% accuracy
+```
+
+### Fit of BMI by triglycerides
+```{r bmi trig}
+bmi_trig_vglm<- vglm(BMI_Category~`Triglycerides (mg/dL)`, data = newDF, family = multinomial)
+summary(bmi_trig_vglm)
+
+## using multinom()
+bmi_trig_nnet<-multinom(nBMICat~`Triglycerides (mg/dL)`, data = newDF)
+summary(bmi_trig_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_trig_nnet))
+
+predBMI_trig<-predict(bmi_trig_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI_trig)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4))) ## normal never predicted
+## removing overweight category since it's never predicted
+round(sum(diag(bmi_cm[-2,-2]))/sum(bmi_cm[-2,-2]), 4) ##66.4% accuracy
+```
+
+### Insulin is associated with BMI and diabetes status
+```{r interaction}
+#df<-data %>% filter(`Insulin (µU/ml)`< 100, BMI_Category != "unknown", BMI_Category != "underweight")
+p<- ggplot(data = newDF, mapping = aes(x = `Insulin (µU/ml)`, fill = Blood_Sugar)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Insulin by Diabetes Criteria", x = "Insulin (µU/ml)") +
+        scale_fill_manual(values = c("yellow","red", "green"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+
+p<- ggplot(data = newDF, mapping = aes(x = `Insulin (µU/ml)`, fill = BMI_Category)) +
+        geom_density(aes(y=..count..), alpha = 0.5) +
+        labs(title = "Insulin by BMI Category", x = "Insulin (µU/ml)") +
+        scale_fill_manual(values = c("yellow","red", "green"))+
+        theme_light()
+p + facet_wrap(vars(Gender))
+#ggsave("/Users/leekapp/Desktop/STAT 235/NHANESproject/plots/bmiIns.pdf", width = 10, height = 8, units = "in")
+```
+
+### BMI by insulin
+```{r BMI insulin}
+bmi_ins_vglm<- vglm(BMI_Category~`Insulin (µU/ml)`, data = newDF, family = multinomial)
+summary(bmi_ins_vglm)
+
+## using multinom()
+bmi_ins_nnet<-multinom(nBMICat~`Insulin (µU/ml)`, data = newDF)
+summary(bmi_ins_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_ins_nnet))
+
+predBMI_ins<-predict(bmi_ins_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI_ins)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4)))
+```
+
+### BMI by insulin and triglycerides
+```{r bmi ins trig}
+bmi_IT_vglm<- vglm(BMI_Category~`Insulin (µU/ml)` + `Triglycerides (mg/dL)`, data = newDF, family = multinomial)
+summary(bmi_IT_vglm)
+
+## using multinom()
+bmi_IT_nnet<-multinom(nBMICat~`Insulin (µU/ml)` + `Triglycerides (mg/dL)`, data = newDF)
+summary(bmi_IT_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_IT_nnet))
+
+predBMI_IT<-predict(bmi_IT_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI_IT)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4)))
+
+### Test using the likelihoods with and without Triglycerides
+anova(bmi_ins_nnet, bmi_IT_nnet, test="Chisq")
+```
+
+### BMI by glycohemoglibin and insulin (but these predictors are probably covarying)
+```{r}
+bmi_IG_vglm<- vglm(BMI_Category~`Insulin (µU/ml)` + Glycohemoglobin, data = newDF, family = multinomial)
+summary(bmi_IG_vglm)
+
+## using multinom()
+bmi_IG_nnet<-multinom(nBMICat~`Insulin (µU/ml)` + Glycohemoglobin, data = newDF)
+summary(bmi_IG_nnet)
+
+#effects on the odds ratio for prediabetes/diabetes vs normal
+exp(coef(bmi_IG_nnet))
+
+predBMI_IG<-predict(bmi_IG_nnet, newDF)
+bmi_cm<-table(actual_bmi = newDF$nBMICat, predicted_bmi = predBMI_IG)
+bmi_cm
+#correct call rate
+print(paste("The single predictor model has a test accuracy of ", round(sum(diag(bmi_cm)/sum(bmi_cm)), 4)))
+
+### Test using the likelihoods with and without Triglycerides
+anova(bmi_ins_nnet, bmi_IG_nnet, test="Chisq")
+```
+
+### Making summary tables with KableExtra
+```{r multi tables}
+models<-read.csv("/Users/leekapp/Desktop/STAT 235/NHANESproject/multiMods.csv")
+#models<-na.omit(models)
+models$Deviance<- na.replace(models$Deviance, "")
+models$Accuracy <- na.replace(models$Accuracy, "")
+rownames(models)<-NULL
+models %>% 
+  kbl(caption = "Table 4. Multicategory baseline logistic regression models") %>% 
+  kable_classic(full_width = F, html_font = "Georgia", font_size = 12) %>% 
+  column_spec(1, bold = T) %>% 
+  row_spec(0, bold = T) %>% 
+  footnote(general = "The baseline for all models shown was the normal category of each response variable") %>% 
+  save_kable("/Users/leekapp/Desktop/STAT 235/NHANESproject/multimods.pdf")
+
+OR<-read.csv("/Users/leekapp/Desktop/STAT 235/NHANESproject/OddsRatios.csv")
+colnames(OR)<-c("Response", "Predictor(s)", "Odds Ratio(s)")
+rownames(OR)<-NULL
+OR %>% 
+  kbl(caption = "Table 5. Odds Ratios from multicategory baseline logistic regression models") %>% 
+  kable_classic(full_width = F, html_font = "Georgia", font_size = 12) %>% 
+  column_spec(1, bold = T) %>% 
+  row_spec(0, bold = T) %>% 
+  footnote(general = "All ratios are relative to the normal category of each response variable") %>% 
+  save_kable("/Users/leekapp/Desktop/STAT 235/NHANESproject/oddRatios.pdf")
+```
+
+```{r htn tables}
+htn<-read.csv("/Users/leekapp/Desktop/STAT 235/NHANESproject/htnMods.csv")
+rownames(htn)<-NULL
+htn %>% 
+  kbl(caption = "Table 3. Ordinary logistic regression models for hypertension") %>% 
+  kable_classic(full_width = F, html_font = "Georgia", font_size = 12) %>% 
+  column_spec(1, bold = T) %>% 
+  row_spec(0, bold = T) %>% 
+  footnote(general = "AIC values are based on training data.") %>% 
+  save_kable("/Users/leekapp/Desktop/STAT 235/NHANESproject/htnMods.pdf")
+
+
+```
+
+```{r cat summary}
+catSumm<-newDF %>% dplyr::select(Gender, HgB_A1C, Blood_Sugar, BMI_Category, Hypertension)
+s<-summary(catSumm)
+attributes(s)
+gs<-summary(catSumm$Gender)
+hs<-summary(na.omit(catSumm$HgB_A1C))
+bs<-summary(catSumm$Blood_Sugar)
+bmis<-summary(catSumm$BMI_Category)
+htns<-summary(catSumm$Hypertension)
+gs;hs;bs;bmis;htns
+```
+
+```{r num summary}
+numDF<-newDF %>% dplyr::select(Glycohemoglobin, `Insulin (µU/ml)`, BMI, `Age (years)`, `Triglycerides (mg/dL)`, `Cholesterol (mg/dL)`)
+g<-summary(numDF$Glycohemoglobin)
+i<-summary(numDF$`Insulin (µU/ml)`)
+b<-summary(numDF$BMI)
+a<-summary(numDF$`Age (years)`)
+t<-summary(numDF$`Triglycerides (mg/dL)`)
+c<-summary(numDF$`Cholesterol (mg/dL)`)
+numSumm<-data.frame(Hgb_A1C = c(g[1], g[2], g[3], g[5], g[6], round(mean(numDF$Glycohemoglobin), 2), round(sd(numDF$Glycohemoglobin), 2)),
+                    `Insulin (µU/ml)` = c(i[1], i[2], i[3], i[5], i[6], round(mean(numDF$`Insulin (µU/ml)`), 2), round(sd(numDF$`Insulin (µU/ml)`), 2)),
+                    BMI = c(b[1], b[2], b[3], b[5], b[6], round(mean(numDF$BMI), 2), round(sd(numDF$BMI), 2)),
+                    `Age (years)` = c(a[1], a[2], a[3], a[5], a[6], round(mean(numDF$`Age (years)`), 2), round(sd(numDF$`Age (years)`), 2)),
+                    `Triglycerides (mg/dL)` = c(t[1], t[2], t[3], t[5], t[6], round(mean(numDF$`Triglycerides (mg/dL)`), 2), round(sd(numDF$`Triglycerides (mg/dL)`), 2)),
+                    `Cholesterol (mg/dL)` = c(c[1], c[2], c[3], c[5], c[6], round(mean(numDF$`Cholesterol (mg/dL)`), 2), round(sd(numDF$`Cholesterol (mg/dL)`), 2)))
+                    
+rownames(numSumm) <-  c("Min", "Q1", "Med", "Q3", "Max", "Mean", "Std Dev")
+colnames(numSumm) <- c("Hgb A1C", "Insulin (µU/ml)", "BMI", "Age (years)", "Triglycerides (mg/dL)", "Cholesterol (mg/dL)")
+
+numSumm %>% 
+  kbl(caption = "Table 2. Summary of numeric predictors examined") %>% 
+  kable_classic(full_width = F, html_font = "Georgia", font_size = 12) %>% 
+  column_spec(1, bold = T) %>% 
+  row_spec(0, bold = T) %>% 
+  save_kable("/Users/leekapp/Desktop/STAT 235/NHANESproject/numSumm.pdf")
+```
+
+```{r summary table1}
+df <- read_xlsx("/Users/leekapp/Documents/Portfolio/STAT235Final/Table1.xlsx")
+colnames(df) <- c("", "Females", "Males", "")
+#have to gewt rid of 'NA' in table for Kable output
+df[1,4] <- ""
+df[2,1:4] <- ""
+df[3,1] <- ""
+df[6,1:4] <- ""
+df[7,1] <- ""
+df[9,1:4] <- ""
+df[10,1] <- ""
+df[10,4] <- ""
+df[11,4] <- ""
+
+df %>%
+  kbl(caption = "Table 1. Summary of catergorical predictors examined") %>% 
+  kable_minimal(full_width = F, html_font = "Georgia", font_size = 12) %>% 
+  column_spec(1, bold = T) %>% 
+  row_spec(0, bold = T) %>% 
+  save_kable("/Users/leekapp/Documents/Portfolio/STAT235Final/catSumm.pdf")
+```
+
