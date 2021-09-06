@@ -2,7 +2,7 @@
 
 # An Exploration of the National Health Examination and Nutrition Survey
 
-*For this assignment I chose to apply methods of multicategory baseline logistic regression to NHANES data to examine associations between BMI, hypertension, glycohemoglobin, and plasma insulin levels.  Each of these measures have relevance to metabolic syndrome.*
+*For this assignment I chose to apply methods of multicategory baseline logistic regression to NHANES data to examine associations between BMI, hypertension, glycohemoglobin, and plasma insulin levels.  Each of these measures has relevance to metabolic syndrome.*
 
 ## Abstract
 
